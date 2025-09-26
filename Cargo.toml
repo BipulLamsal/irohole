@@ -1,0 +1,10 @@
+[package]
+name = "file-transfer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+iroh = {version="0.92.0", features=["discovery-local-network"]} 
+iroh-blobs = "0.94.0"
+tokio = "1.47.1"
