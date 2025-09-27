@@ -3,14 +3,14 @@ use clap::{ArgMatches, Args as _, Command, FromArgMatches, Parser, Subcommand};
 /// Serve the your resources to peer's
 #[derive(Parser, Debug)]
 pub struct ServeArgs {
-    /// Name of the service to open port for 
-    #[arg(short,long)]
-    name: String,
-    /// Port on which service is served 
+    /// Name of the service to open port for
+    #[arg(short, long)]
+    pub name: String,
+    /// Port on which service is served
     #[arg(long)]
-    port:u16,
+    pub port: u16,
     #[arg(long, default_value = "http")]
-    protocol: String,
+    pub protocol: String,
 }
 /// Connect to your peer's resouce
 #[derive(Parser, Debug)]
@@ -23,14 +23,13 @@ pub struct ConnectArgs {
 
 #[derive(Debug)]
 pub enum CliSub {
-    /// Daemon service for irohole 
+    /// Daemon service for irohole
     Daemon(),
-    /// Serve the your resources to peer's 
+    /// Serve the your resources to peer's
     Serve(ServeArgs),
-    /// Connect to your peer's resouce 
-    Connect(ConnectArgs)
+    /// Connect to your peer's resouce
+    Connect(ConnectArgs),
 }
-
 
 impl FromArgMatches for CliSub {
     fn from_arg_matches(matches: &ArgMatches) -> Result<Self, Error> {
@@ -57,7 +56,7 @@ impl FromArgMatches for CliSub {
                 return Err(Error::raw(
                     ErrorKind::InvalidSubcommand,
                     "Valid subcommands are `daemon`,`serve` and `connect`",
-                ))
+                ));
             }
             None => (),
         };
@@ -69,13 +68,13 @@ impl Subcommand for CliSub {
     fn augment_subcommands(cmd: Command) -> Command {
         cmd.subcommand(Command::new("daemon"))
             .subcommand(ServeArgs::augment_args(Command::new("serve")))
-           .subcommand(ConnectArgs::augment_args(Command::new("connect")))
+            .subcommand(ConnectArgs::augment_args(Command::new("connect")))
             .subcommand_required(true)
     }
     fn augment_subcommands_for_update(cmd: Command) -> Command {
         cmd.subcommand(Command::new("daemon"))
             .subcommand(ServeArgs::augment_args(Command::new("serve")))
-           .subcommand(ConnectArgs::augment_args(Command::new("connect")))
+            .subcommand(ConnectArgs::augment_args(Command::new("connect")))
             .subcommand_required(true)
     }
     fn has_subcommand(name: &str) -> bool {
@@ -84,8 +83,8 @@ impl Subcommand for CliSub {
 }
 
 #[derive(Parser, Debug)]
+#[command(about = "Decentralized P2P network tunneling")]
 pub struct Cli {
     #[command(subcommand)]
     pub subcommand: CliSub,
 }
-
