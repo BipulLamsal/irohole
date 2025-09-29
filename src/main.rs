@@ -2,25 +2,27 @@
 use clap::Parser;
 use irohole::cli::Cli;
 use irohole::cli::CliSub;
+use irohole::connect::Connect;
+use irohole::daemon::Daemon;
 use irohole::service::Service;
-use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    init_tracing()?;
+    // init_tracing()?;
 
     match cli.subcommand {
-        CliSub::Daemon() => todo!(),
+        CliSub::Daemon() => {
+            let daemon = Daemon::new().await?;
+            daemon.run().await?;
+        }
         CliSub::Serve(args) => {
             let service = Service::new(args.name, None, args.port);
-            service.start().await?;
             match service.start().await {
-                Ok(proxy_port) => {
+                Ok(_) => {
                     println!("🎉 Proxy ready!");
-                    println!("   Target: http://localhost:{}", args.port);
-                    println!("   Proxy: http://localhost:{}", proxy_port);
-                    println!("   Press Ctrl+C to stop");
+                    println!("   Proxy address served: http://localhost:{}", args.port);
+                    println!("   Press Ctrl+C to stop serving");
                     tokio::signal::ctrl_c().await?;
                     println!("👋 Shutting down proxy");
                 }
@@ -29,7 +31,10 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        CliSub::Connect(args) => todo!(),
+        CliSub::Connect(args) => {
+            let connect = Connect::new(args.name, args.node, None, args.port);
+            connect.start().await?;
+        }
     }
 
     Ok(())

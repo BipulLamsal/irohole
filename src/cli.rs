@@ -6,7 +6,7 @@ pub struct ServeArgs {
     /// Name of the service to open port for
     #[arg(short, long)]
     pub name: String,
-    /// Port on which service is served
+    /// Port from which service is delivered
     #[arg(long)]
     pub port: u16,
     #[arg(long, default_value = "http")]
@@ -15,10 +15,15 @@ pub struct ServeArgs {
 /// Connect to your peer's resouce
 #[derive(Parser, Debug)]
 pub struct ConnectArgs {
+    /// Name of the service to subscribe
     #[arg(long)]
-    target: String,
+    pub name: String,
+    /// NodeId of the of other service provider  
     #[arg(long)]
-    local_port: u16,
+    pub node: String,
+    /// Port on which service is served
+    #[arg(long)]
+    pub port: u16,
 }
 
 #[derive(Debug)]
