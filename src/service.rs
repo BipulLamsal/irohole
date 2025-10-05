@@ -19,6 +19,9 @@ impl Service {
     pub async fn start(&self) -> anyhow::Result<()> {
         let addr = SocketAddr(self.ip, self.port);
         let service_name = self.name.clone();
+        println!("🎉 Proxy ready!");
+        println!("   Proxy address served: http://localhost:{}", self.port);
+        println!("   Press Ctrl+C to stop serving");
         handle_ipc_connection(service_name, addr.into(), IpcMessageType::Serve, None).await?;
         Ok(())
     }

@@ -1,5 +1,6 @@
 use std::net::SocketAddrV4;
 
+use anyhow::anyhow;
 use tokio::net::TcpStream;
 
 use crate::daemon::ipc::{handle_ipc_connection, IpcMessageType, SocketAddr};
@@ -22,7 +23,10 @@ impl Connect {
     }
     pub async fn start(&self) -> anyhow::Result<()> {
         let addr = SocketAddr(self.ip, self.port);
-        self.test_local_service(addr).await?;
+        let test = self.test_local_service(addr).await;
+        if test.is_ok() {
+            return Err(anyhow!("Port already running cannot served on {}", addr));
+        }
         handle_ipc_connection(
             self.name.clone(),
             addr.into(),

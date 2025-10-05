@@ -18,18 +18,7 @@ async fn main() -> anyhow::Result<()> {
         }
         CliSub::Serve(args) => {
             let service = Service::new(args.name, None, args.port);
-            match service.start().await {
-                Ok(_) => {
-                    println!("🎉 Proxy ready!");
-                    println!("   Proxy address served: http://localhost:{}", args.port);
-                    println!("   Press Ctrl+C to stop serving");
-                    tokio::signal::ctrl_c().await?;
-                    println!("👋 Shutting down proxy");
-                }
-                Err(e) => {
-                    eprintln!("❌ Failed to start proxy: {}", e);
-                }
-            }
+            service.start().await?;
         }
         CliSub::Connect(args) => {
             let connect = Connect::new(args.name, args.node, None, args.port);

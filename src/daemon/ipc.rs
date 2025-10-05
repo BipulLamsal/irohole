@@ -173,16 +173,16 @@ impl fmt::Display for IpcMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             IpcMessage::Serve { name, addr } => {
-                writeln!(f, "serve:{}:{}", name, addr)
+                writeln!(f, "serve:{}::{}", name, addr)
             }
             IpcMessage::Data { name, message } => {
-                writeln!(f, "data:{}:{}", name, message)
+                writeln!(f, "data:{}::{}", name, message)
             }
             IpcMessage::Connect { name, addr, node } => {
-                writeln!(f, "connect:{}:{}:{}", name, addr, node)
+                writeln!(f, "connect:{}:{}:{}", name, node, addr)
             }
             IpcMessage::Error { name, message } => {
-                writeln!(f, "error:{}:{}", name, message)
+                writeln!(f, "error:{}::{}", name, message)
             }
         }
     }

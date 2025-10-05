@@ -5,10 +5,13 @@ use ipc::IpcMessage;
 use iroh::endpoint::RecvStream;
 use iroh::endpoint::SendStream;
 use iroh::Endpoint;
+use iroh::NodeAddr;
+use iroh::PublicKey;
 use std::fs;
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::task::Context as Ctx;
 use std::task::Poll;
 use tokio::io::AsyncBufReadExt;
@@ -17,6 +20,7 @@ use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::io::ReadBuf;
+use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::net::UnixListener;
 use tokio::net::UnixStream;
@@ -47,8 +51,8 @@ impl Daemon {
         })
     }
     pub async fn run(&self) -> anyhow::Result<()> {
-        println!("🚀 IroHole daemon starting...");
-        println!("✨ Node ID: {}", self.endpoint.node_id());
+        println!("🚀 IroHole daemon started");
+        // println!("✨ Node ID: {}", self.endpoint.node_id());
         let listener = UnixListener::bind(self.socket.clone())?;
         loop {
             match listener.accept().await {
@@ -88,11 +92,8 @@ async fn handle_client(stream: UnixStream, endpoint: Endpoint) -> anyhow::Result
                 writer.write_all(response.to_string().as_bytes()).await?;
             }
 
-            IpcMessage::Connect {
-                name,
-                addr: _,
-                node,
-            } => {
+            IpcMessage::Connect { name, addr, node } => {
+                connect_remote_peer(endpoint, addr, node.clone()).await?;
                 let response = IpcMessage::Data {
                     name,
                     message: format!("connecting to {}", node),
@@ -105,24 +106,67 @@ async fn handle_client(stream: UnixStream, endpoint: Endpoint) -> anyhow::Result
     Ok(())
 }
 /// serve connection to the remote network
-async fn handle_proxy_connection(
+async fn handle_proxy_connection(endpoint: Endpoint, addr: SocketAddr) -> anyhow::Result<()> {
+    loop {
+        let incoming = endpoint.accept().await.context("No incoming connections")?;
+        tokio::spawn({
+            async move {
+                if let Ok(iroh_conn) = incoming.await {
+                    match iroh_conn.accept_bi().await {
+                        Ok((send_stream, recv_stream)) => {
+                            if let Ok(mut tcp_stream) =
+                                TcpStream::connect::<SocketAddrV4>(addr.into()).await
+                            {
+                                let mut iroh_stream = IrohBiStream {
+                                    recv: recv_stream,
+                                    send: send_stream,
+                                };
+                                if let Err(e) =
+                                    tokio::io::copy_bidirectional(&mut tcp_stream, &mut iroh_stream)
+                                        .await
+                                {
+                                    eprintln!("Proxy error: {:?}", e);
+                                }
+                            } else {
+                                eprintln!("Failed to connect to local server");
+                            }
+                        }
+                        Err(e) => eprintln!("Failed to accept Iroh stream: {:?}", e),
+                    }
+                }
+            }
+        });
+    }
+}
+
+/// connect to the remote peer
+async fn connect_remote_peer(
     endpoint: Endpoint,
     target_socket: SocketAddr,
+    node_addr: String,
 ) -> anyhow::Result<()> {
-    let mut tcp_stream = TcpStream::connect::<SocketAddrV4>(target_socket.into()).await?;
-    let iroh_conn = endpoint
-        .accept()
-        .await
-        .context("No Incoming Connections")?
-        .await?;
-    let (send_stream, recv_stream) = iroh_conn.accept_bi().await?;
-    let mut iroh_stream = IrohBiStream {
-        recv: recv_stream,
-        send: send_stream,
-    };
-    tokio::io::copy_bidirectional(&mut tcp_stream, &mut iroh_stream).await?;
-    // tokio::io::copy(&mut tcp_reader, &mut send_stream).await?;
-    // tokio::io::copy(&mut recv_stream, &mut tcp_writer).await?;
+    let pk = PublicKey::from_str(node_addr.as_str())?;
+    let addr = NodeAddr::new(pk);
+    let quic_connection = endpoint.connect(addr, b"irohole/1").await?;
+    let listener = TcpListener::bind::<SocketAddrV4>(target_socket.into()).await?;
+    loop {
+        let (mut local_stream, _addr) = listener.accept().await?;
+        let quic_connection = quic_connection.clone();
+        tokio::spawn(async move {
+            match quic_connection.open_bi().await {
+                Ok((send, recv)) => {
+                    let mut iroh_stream = IrohBiStream { recv, send };
+                    if let Err(e) =
+                        tokio::io::copy_bidirectional(&mut local_stream, &mut iroh_stream).await
+                    {
+                        eprintln!("Proxy error: {:?}", e);
+                    }
+                }
+                Err(e) => eprintln!("Failed to open Iroh stream: {:?}", e),
+            }
+        });
+    }
+
     Ok(())
 }
 
