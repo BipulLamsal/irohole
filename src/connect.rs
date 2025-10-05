@@ -3,7 +3,7 @@ use std::net::SocketAddrV4;
 use anyhow::anyhow;
 use tokio::net::TcpStream;
 
-use crate::daemon::ipc::{handle_ipc_connection, IpcMessageType, SocketAddr};
+use crate::daemon::ipc::{IpcMessageType, SocketAddr, handle_ipc_connection};
 
 pub struct Connect {
     node: String,

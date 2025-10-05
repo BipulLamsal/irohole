@@ -28,6 +28,9 @@ pub enum IpcMessage {
         node: String,
         addr: SocketAddr,
     },
+    Stop {
+        name: String,
+    },
     Error {
         name: String,
         message: String,
@@ -148,6 +151,9 @@ impl FromStr for IpcMessage {
                 name: name.to_string(),
                 message: rest.to_string(),
             }),
+            "stop" => Ok(IpcMessage::Stop {
+                name: name.to_string(),
+            }),
             other => Err(IpcError::UnknownCommand(other.to_string())),
         }
     }
@@ -183,6 +189,9 @@ impl fmt::Display for IpcMessage {
             }
             IpcMessage::Error { name, message } => {
                 writeln!(f, "error:{}::{}", name, message)
+            }
+            IpcMessage::Stop { name } => {
+                writeln!(f, "stop:{}::", name)
             }
         }
     }
@@ -250,6 +259,17 @@ pub async fn handle_ipc_connection(
             Err(err) => eprintln!("Error: {:?}", err),
         }
     }
+
+    Ok(())
+}
+
+///Stoping the service
+pub async fn send_stop_command(name: String) -> anyhow::Result<()> {
+    let socket_path = std::env::temp_dir().join("irohole.sock");
+    let mut stream = UnixStream::connect(socket_path).await?;
+
+    let stop_msg = IpcMessage::Stop { name };
+    stream.write_all(stop_msg.to_string().as_bytes()).await?;
 
     Ok(())
 }

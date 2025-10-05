@@ -1,5 +1,4 @@
 #![allow(unreachable_code)]
-
 use anyhow::Context;
 use ipc::IpcMessage;
 use iroh::endpoint::RecvStream;
@@ -7,11 +6,14 @@ use iroh::endpoint::SendStream;
 use iroh::Endpoint;
 use iroh::NodeAddr;
 use iroh::PublicKey;
+use rand::Rng;
+use std::collections::HashMap;
 use std::fs;
 use std::net::SocketAddrV4;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::task::Context as Ctx;
 use std::task::Poll;
 use tokio::io::AsyncBufReadExt;
@@ -20,18 +22,31 @@ use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::io::ReadBuf;
+use tokio::net::unix::OwnedWriteHalf;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::net::UnixListener;
 use tokio::net::UnixStream;
+use tokio::sync::oneshot;
+use tokio::sync::Mutex;
 
+use crate::daemon::ipc::IpcMessageType;
 use crate::daemon::ipc::SocketAddr;
 
 pub mod ipc;
 
+type Tunnels = Arc<Mutex<HashMap<u16, Tunnel>>>;
+
 pub struct Daemon {
     endpoint: Endpoint,
     socket: PathBuf,
+    tunnels: Tunnels,
+}
+pub struct Tunnel {
+    name: String,
+    addr: SocketAddr,
+    tunnel_type: IpcMessageType,
+    shutdown_tx: tokio::sync::oneshot::Sender<()>,
 }
 
 impl Daemon {
@@ -48,19 +63,20 @@ impl Daemon {
                 .bind()
                 .await?,
             socket,
+            tunnels: Arc::new(Mutex::new(HashMap::new())),
         })
     }
     pub async fn run(&self) -> anyhow::Result<()> {
         println!("🚀 IroHole daemon started");
-        // println!("✨ Node ID: {}", self.endpoint.node_id());
         let listener = UnixListener::bind(self.socket.clone())?;
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
                     let ep = self.endpoint.clone();
+                    let tunnels = self.tunnels.clone();
                     println!("✨ New Client Attached");
                     tokio::spawn(async move {
-                        if let Err(e) = handle_client(stream, ep).await {
+                        if let Err(e) = handle_client(stream, ep, tunnels).await {
                             eprintln!("🚨 IPC client error: {:?}", e);
                         }
                     });
@@ -72,7 +88,11 @@ impl Daemon {
     }
 }
 
-async fn handle_client(stream: UnixStream, endpoint: Endpoint) -> anyhow::Result<()> {
+async fn handle_client(
+    stream: UnixStream,
+    endpoint: Endpoint,
+    tunnels: Tunnels,
+) -> anyhow::Result<()> {
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
     let first_message = lines.next_line().await?;
@@ -84,12 +104,36 @@ async fn handle_client(stream: UnixStream, endpoint: Endpoint) -> anyhow::Result
         match command {
             IpcMessage::Serve { name, addr } => {
                 // here we serve our stream info the p2p iroh protocol
-                handle_proxy_connection(ep, addr).await?;
-                let response = IpcMessage::Data {
-                    name,
-                    message: format!("registered at {}", addr),
+                let ticket = {
+                    let tunnels_map = tunnels.lock().await;
+                    let name_exists = tunnels_map.values().any(|t| t.name == name);
+                    if name_exists {
+                        writer
+                            .write_all(format!("Tunnel '{}' already exists\n", name).as_bytes())
+                            .await?;
+                        return Ok(());
+                    }
+
+                    loop {
+                        let ticket = generate_id();
+                        if !tunnels_map.contains_key(&ticket) {
+                            break ticket; // found unique ticket, exit loop
+                        }
+                    }
                 };
-                writer.write_all(response.to_string().as_bytes()).await?;
+                let (shutdown_tx, shutdown_rx) = oneshot::channel();
+                let tunnel = Tunnel {
+                    name: name.clone(),
+                    addr,
+                    tunnel_type: IpcMessageType::Serve,
+                    shutdown_tx,
+                };
+                {
+                    let mut tunnels_map = tunnels.lock().await;
+                    tunnels_map.insert(ticket, tunnel);
+                }
+
+                handle_proxy_connection(ep, addr, shutdown_rx, writer).await?;
             }
 
             IpcMessage::Connect { name, addr, node } => {
@@ -100,43 +144,125 @@ async fn handle_client(stream: UnixStream, endpoint: Endpoint) -> anyhow::Result
                 };
                 writer.write_all(response.to_string().as_bytes()).await?;
             }
+
+            IpcMessage::Stop { name } => {
+                let mut tunnels_map = tunnels.lock().await;
+                let tunnel_to_stop = tunnels_map
+                    .iter()
+                    .find(|(_, tunnel)| tunnel.name == name)
+                    .map(|(key, _)| *key);
+                if let Some(ticket_id) = tunnel_to_stop {
+                    if let Some(tunnel) = tunnels_map.remove(&ticket_id) {
+                        if tunnel.shutdown_tx.send(()).is_err() {
+                            writer
+                                .write_all(
+                                    format!("Unable tol Stop the  tunnel: {}\n", name).as_bytes(),
+                                )
+                                .await?;
+                        }
+                        writer
+                            .write_all(format!("Stopped tunnel: {}\n", name).as_bytes())
+                            .await?;
+                    }
+                } else {
+                    writer.write_all(b"Tunnel not found\n").await?;
+                }
+            }
             _ => {}
         }
     }
     Ok(())
 }
 /// serve connection to the remote network
-async fn handle_proxy_connection(endpoint: Endpoint, addr: SocketAddr) -> anyhow::Result<()> {
+async fn handle_proxy_connection(
+    endpoint: Endpoint,
+    addr: SocketAddr,
+    mut shutdown_rx: oneshot::Receiver<()>,
+    mut writer: OwnedWriteHalf,
+) -> anyhow::Result<()> {
+    // tx and rx for writer events
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+
+    writer
+        .write_all(format!("Tunnel active: {}, waiting for connections...\n", addr).as_bytes())
+        .await?;
+
     loop {
-        let incoming = endpoint.accept().await.context("No incoming connections")?;
-        tokio::spawn({
-            async move {
-                if let Ok(iroh_conn) = incoming.await {
-                    match iroh_conn.accept_bi().await {
-                        Ok((send_stream, recv_stream)) => {
-                            if let Ok(mut tcp_stream) =
-                                TcpStream::connect::<SocketAddrV4>(addr.into()).await
-                            {
-                                let mut iroh_stream = IrohBiStream {
-                                    recv: recv_stream,
-                                    send: send_stream,
-                                };
-                                if let Err(e) =
-                                    tokio::io::copy_bidirectional(&mut tcp_stream, &mut iroh_stream)
-                                        .await
+        tokio::select! {
+            result = endpoint.accept() => {
+                let incoming = result.context("No incoming connections")?;
+                let remote_addr = incoming.remote_address();
+
+                writer
+                    .write_all(format!("New connection from {}\n", remote_addr).as_bytes())
+                    .await?;
+
+                let event_tx = event_tx.clone();
+
+                tokio::spawn(async move {
+                    if let Ok(iroh_conn) = incoming.await {
+                        match iroh_conn.accept_bi().await {
+                            Ok((send_stream, recv_stream)) => {
+                                if let Ok(mut tcp_stream) =
+                                    TcpStream::connect::<SocketAddrV4>(addr.into()).await
                                 {
-                                    eprintln!("Proxy error: {:?}", e);
+                                    let mut iroh_stream = IrohBiStream {
+                                        recv: recv_stream,
+                                        send: send_stream,
+                                    };
+
+                                    let mut peek_buf = [0u8; 512];
+                                    if let Ok(n) = tcp_stream.peek(&mut peek_buf).await && n > 0 {
+                                        let line = String::from_utf8_lossy(&peek_buf[..n]);
+                                        if let Some(first_line) = line.lines().next() {
+                                            let parts: Vec<&str> = first_line.split_whitespace().collect();
+                                            if parts.len() >= 2
+                                                && (parts[0] == "GET"
+                                                    || parts[0] == "POST"
+                                                    || parts[0] == "PUT"
+                                                    || parts[0] == "DELETE")
+                                            {
+                                                let _ = event_tx.send(format!("{} {}\n", parts[0], parts[1]));
+                                            }
+                                        }
+                                    }
+
+                                    match tokio::io::copy_bidirectional(&mut tcp_stream, &mut iroh_stream).await {
+                                        Ok((to_server, to_client)) => {
+                                            let _ = event_tx.send(format!(
+                                                "Connection closed: ↑{}B ↓{}B\n",
+                                                to_server, to_client
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            let _ = event_tx.send(format!("Proxy error: {:?}\n", e));
+                                        }
+                                    }
+                                } else {
+                                    let _ = event_tx.send("Failed to connect to local server\n".to_string());
                                 }
-                            } else {
-                                eprintln!("Failed to connect to local server");
+                            }
+                            Err(e) => {
+                                let _ = event_tx.send(format!("Failed to accept stream: {:?}\n", e));
                             }
                         }
-                        Err(e) => eprintln!("Failed to accept Iroh stream: {:?}", e),
                     }
-                }
+                });
             }
-        });
+
+            Some(msg) = event_rx.recv() => {
+                writer.write_all(msg.as_bytes()).await?;
+            }
+
+            // shutdown signal killing the loops and will drop the result
+            _ = &mut shutdown_rx => {
+                writer.write_all(b"Tunnel shutting down...\n").await?;
+                break;
+            }
+        }
     }
+
+    Ok(())
 }
 
 /// connect to the remote peer
@@ -203,7 +329,7 @@ impl AsyncWrite for IrohBiStream {
     }
 }
 
-// fn generate_id() -> ConnectionId {
-//     let mut rng = rand::rng();
-//     rng.random::<ConnectionId>()
-// }
+fn generate_id() -> u16 {
+    let mut rng = rand::rng();
+    rng.random::<u16>()
+}
