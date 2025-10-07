@@ -1,4 +1,4 @@
-use crate::daemon::ipc::{handle_ipc_connection, send_stop_command, IpcMessageType, SocketAddr};
+use crate::daemon::ipc::{IpcMessageType, SocketAddr, handle_ipc_connection, send_stop_command};
 
 pub struct Service {
     name: String,

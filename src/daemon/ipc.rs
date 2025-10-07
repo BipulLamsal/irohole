@@ -7,6 +7,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::net::UnixStream;
 
+pub const IPC_SOCKET: &str = "irohole2.sock";
+
 #[derive(Debug)]
 pub enum IpcMessageType {
     Serve,
@@ -20,19 +22,17 @@ pub enum IpcMessage {
         addr: SocketAddr,
     },
     Data {
-        name: String,
         message: String,
     },
     Connect {
         name: String,
-        node: String,
+        ticket: String,
         addr: SocketAddr,
     },
     Stop {
         name: String,
     },
     Error {
-        name: String,
         message: String,
     },
 }
@@ -125,7 +125,7 @@ impl FromStr for IpcMessage {
 
         let command = parts.next().ok_or(IpcError::InvalidFormat)?;
         let name = parts.next().ok_or(IpcError::InvalidFormat)?;
-        let node = parts.next().ok_or(IpcError::InvalidFormat)?;
+        let ticket = parts.next().ok_or(IpcError::InvalidFormat)?;
         let rest = parts.next().ok_or(IpcError::InvalidFormat)?;
         match command {
             "serve" => {
@@ -136,19 +136,17 @@ impl FromStr for IpcMessage {
                 })
             }
             "data" => Ok(IpcMessage::Data {
-                name: name.to_string(),
                 message: rest.to_string(),
             }),
             "connect" => {
                 let addr = parse_addr(rest)?;
                 Ok(IpcMessage::Connect {
-                    node: node.to_string(),
+                    ticket: ticket.to_string(),
                     name: name.to_string(),
                     addr,
                 })
             }
             "error" => Ok(IpcMessage::Error {
-                name: name.to_string(),
                 message: rest.to_string(),
             }),
             "stop" => Ok(IpcMessage::Stop {
@@ -179,19 +177,19 @@ impl fmt::Display for IpcMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             IpcMessage::Serve { name, addr } => {
-                writeln!(f, "serve:{}::{}", name, addr)
+                writeln!(f, "serve:{}: :{}", name, addr)
             }
-            IpcMessage::Data { name, message } => {
-                writeln!(f, "data:{}::{}", name, message)
+            IpcMessage::Data { message } => {
+                writeln!(f, "data: : :{}", message)
             }
-            IpcMessage::Connect { name, addr, node } => {
-                writeln!(f, "connect:{}:{}:{}", name, node, addr)
+            IpcMessage::Connect { name, addr, ticket } => {
+                writeln!(f, "connect:{}:{}:{}", name, ticket, addr)
             }
-            IpcMessage::Error { name, message } => {
-                writeln!(f, "error:{}::{}", name, message)
+            IpcMessage::Error { message } => {
+                writeln!(f, "error: : :{}", message)
             }
             IpcMessage::Stop { name } => {
-                writeln!(f, "stop:{}::", name)
+                writeln!(f, "stop:{}: : ", name)
             }
         }
     }
@@ -228,7 +226,7 @@ pub async fn handle_ipc_connection(
     message_type: IpcMessageType,
     node: Option<String>,
 ) -> anyhow::Result<()> {
-    let socket = std::env::temp_dir().join("irohole.sock");
+    let socket = std::env::temp_dir().join(IPC_SOCKET);
     let stream = UnixStream::connect(&socket).await?;
     let (stream_reader, mut stream_writer) = stream.into_split();
 
@@ -239,11 +237,11 @@ pub async fn handle_ipc_connection(
             if let Some(n) = node {
                 IpcMessage::Connect {
                     name: name.to_string(),
-                    node: n.to_string(),
+                    ticket: n.to_string(),
                     addr,
                 }
             } else {
-                bail!("Node Id is required")
+                bail!("Ticket is required")
             }
         }
     };
@@ -265,7 +263,7 @@ pub async fn handle_ipc_connection(
 
 ///Stoping the service
 pub async fn send_stop_command(name: String) -> anyhow::Result<()> {
-    let socket_path = std::env::temp_dir().join("irohole.sock");
+    let socket_path = std::env::temp_dir().join(IPC_SOCKET);
     let mut stream = UnixStream::connect(socket_path).await?;
 
     let stop_msg = IpcMessage::Stop { name };

@@ -9,19 +9,19 @@ pub struct ServeArgs {
     /// Port from which service is delivered
     #[arg(long)]
     pub port: u16,
-    #[arg(long, default_value = "http")]
+    #[arg(long, default_value = "tcp")]
     pub protocol: String,
 }
 /// Connect to your peer's resouce
 #[derive(Parser, Debug)]
 pub struct ConnectArgs {
-    /// Name of the service to subscribe
+    /// Your local name of the service to subscribe
     #[arg(long)]
     pub name: String,
-    /// NodeId of the of other service provider  
+    /// Ticket of the service provider  
     #[arg(long)]
-    pub node: String,
-    /// Port on which service is served
+    pub ticket: String,
+    /// Your local port on which service is served
     #[arg(long)]
     pub port: u16,
 }

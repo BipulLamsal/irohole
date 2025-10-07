@@ -21,7 +21,7 @@ async fn main() -> anyhow::Result<()> {
             service.start().await?;
         }
         CliSub::Connect(args) => {
-            let connect = Connect::new(args.name, args.node, None, args.port);
+            let connect = Connect::new(args.name, args.ticket, None, args.port);
             connect.start().await?;
         }
     }
