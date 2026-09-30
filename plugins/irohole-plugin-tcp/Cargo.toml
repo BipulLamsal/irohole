@@ -1,0 +1,11 @@
+[package]
+name = "irohole-plugin-tcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TCP tunnel as a plugin"
+
+[dependencies]
+irohole-proto.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
