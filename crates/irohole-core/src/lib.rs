@@ -2,4 +2,4 @@ pub mod registry;
 pub mod transport;
 
 pub use registry::Registry;
-pub use transport::{ALPN, connect, create_endpoint, serve};
+pub use transport::{ALPN, connect, create_endpoint, serve, with_ctrl_c};

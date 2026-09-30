@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/irohole-proto", "crates/irohole-core", "plugins/irohole-plugin-tcp", "plugins/irohole-plugins"]
+members = ["crates/irohole-proto", "crates/irohole-core", "crates/irohole-cli", "plugins/irohole-plugin-tcp", "plugins/irohole-plugins"]
 resolver = "3"
 
 [workspace.package]
@@ -10,6 +10,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 anyhow = "1"
 async-trait = "0.1"
+clap = { version = "4", default-features = false, features = ["derive", "std", "help", "usage", "error-context"] }
 postcard = { version = "1", default-features = false, features = ["alloc"] }
 iroh = { version = "1.3", default-features = false, features = ["tls-ring"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }

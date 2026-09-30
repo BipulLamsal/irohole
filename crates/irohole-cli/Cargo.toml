@@ -1,14 +1,18 @@
 [package]
-name = "irohole-plugin-tcp"
+name = "irohole-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "TCP tunnel as a plugin"
+description = "CLI host for irohole (serve + connect)"
+
+[[bin]]
+name = "irohole"
+path = "src/main.rs"
 
 [dependencies]
 irohole-core.workspace = true
 irohole-proto.workspace = true
+irohole-plugin-tcp.workspace = true
 anyhow.workspace = true
-async-trait.workspace = true
 clap.workspace = true
 tokio.workspace = true

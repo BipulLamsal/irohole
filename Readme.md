@@ -8,6 +8,6 @@ phones, ESP32 bridge, or anything we can custom build.
 
 ### Experimenting with: 
 
-* [ ] TCP tunnel as a plugin
+* [x] TCP tunnel as a plugin
 * [ ] plugin for input 
 * [ ] plugin for screen

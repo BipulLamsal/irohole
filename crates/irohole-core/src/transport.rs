@@ -10,6 +10,18 @@ use crate::Registry;
 
 pub const ALPN: &[u8] = b"irohole/1";
 
+pub async fn with_ctrl_c(
+    fut: impl std::future::Future<Output = anyhow::Result<()>>,
+) -> anyhow::Result<()> {
+    tokio::select! {
+        r = fut => r,
+        _ = tokio::signal::ctrl_c() => {
+            println!("Shutting down.");
+            Ok(())
+        }
+    }
+}
+
 pub async fn create_endpoint() -> anyhow::Result<Endpoint> {
     let ep = Endpoint::builder(presets::N0)
         .alpns(vec![ALPN.to_vec()])
